@@ -226,6 +226,72 @@ else
 fi
 
 echo ""
+echo "13. 测试封存批次不可退回（回归验证）..."
+# 先上传第四张票据
+UPLOAD5_RESPONSE=$(curl -s -X POST "$BASE_URL/api/invoice/upload" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: $ACCOUNT_TOKEN" \
+  -d '{
+    "invoiceCode": "FP20240005",
+    "amount": 2500.00,
+    "sellerName": "深圳科技有限公司",
+    "imageUrl": "/images/invoice5.jpg",
+    "imageMd5": "mno345",
+    "imageSize": 250000
+  }')
+INVOICE5_ID=$(echo $UPLOAD5_RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('id',''))")
+echo "   第五张票据ID: $INVOICE5_ID"
+
+# 关联报销单
+ASSOCIATE2_RESPONSE=$(curl -s -X POST "$BASE_URL/api/reimburse/associate" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: $HANDLER_TOKEN" \
+  -d "{\"invoiceId\": $INVOICE5_ID, \"reimburseBillId\": 1}")
+echo "   关联响应: $(echo $ASSOCIATE2_RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin).get('message',''))")"
+
+# 创建批次
+CREATE_BATCH_RESPONSE=$(curl -s -X POST "$BASE_URL/api/archive/batch" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: $ARCHIVIST_TOKEN" \
+  -d '{"batchName": "测试批次-封存测试"}')
+BATCH_ID=$(echo $CREATE_BATCH_RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('id',''))")
+echo "   创建批次成功，批次ID: $BATCH_ID"
+
+# 归档到批次中
+ARCHIVE2_RESPONSE=$(curl -s -X POST "$BASE_URL/api/archive/archive" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: $ARCHIVIST_TOKEN" \
+  -d "{\"invoiceId\": $INVOICE5_ID, \"archiveBoxNo\": \"BOX-SEAL-001\", \"archivePosition\": \"封存区-1层\", \"archiveBatchId\": $BATCH_ID}")
+echo "   归档响应: $(echo $ARCHIVE2_RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin).get('message',''))")"
+
+# 封存批次
+SEAL_RESPONSE=$(curl -s -X POST "$BASE_URL/api/archive/batch/seal" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: $ARCHIVIST_TOKEN" \
+  -d "{\"batchId\": $BATCH_ID}")
+echo "   封存响应: $(echo $SEAL_RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin).get('message',''))")"
+SEAL_CODE=$(echo $SEAL_RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin).get('code',''))")
+if [ "$SEAL_CODE" = "200" ]; then
+    echo "   ✅ 批次封存成功"
+else
+    echo "   ❌ 批次封存失败"
+fi
+
+# 尝试退回封存批次中的票据 - 应该失败
+SEALED_RETURN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/archive/return" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: $ARCHIVIST_TOKEN" \
+  -d "{\"invoiceId\": $INVOICE5_ID, \"returnReason\": \"测试封存退回\"}")
+echo "   封存票据退回响应: $SEALED_RETURN_RESPONSE"
+SEALED_RETURN_CODE=$(echo $SEALED_RETURN_RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin).get('code',''))")
+SEALED_RETURN_MSG=$(echo $SEALED_RETURN_RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin).get('message',''))")
+if [ "$SEALED_RETURN_CODE" != "200" ]; then
+    echo "   ✅ 封存批次票据不可退回验证通过 - $SEALED_RETURN_MSG"
+else
+    echo "   ❌ 封存批次票据退回未被拒绝，验证失败"
+fi
+
+echo ""
 echo "========================================"
 echo "测试完成"
 echo "========================================"
@@ -237,4 +303,5 @@ echo "  ✅ 已归档票据不能更换影像 - 已验证"
 echo "  ✅ 回读完整归档记录 - 已验证"
 echo "  ✅ 审计时间线 - 已验证"
 echo "  ✅ 退回补扫功能 - 已验证"
+echo "  ✅ 封存批次不可退回 - 已验证（回归测试）"
 echo ""

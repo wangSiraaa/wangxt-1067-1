@@ -106,20 +106,10 @@ public class InvoiceService {
         Invoice invoice = invoiceRepository.findById(invoiceId)
                 .orElseThrow(() -> new BusinessException("票据不存在"));
 
-        if (invoice.getStatus() == InvoiceStatus.SEALED || invoice.getStatus() == InvoiceStatus.AUDIT_SPOTCHECK) {
-            throw new BusinessException("已封存或抽查中的票据不能更换影像，需先申请解封");
-        }
-
-        if (invoice.getStatus() == InvoiceStatus.ARCHIVED) {
-            if (invoice.getArchiveBatchId() != null) {
-                ArchiveBatch batch = archiveBatchRepository.findById(invoice.getArchiveBatchId()).orElse(null);
-                if (batch != null && batch.getSealed()) {
-                    throw new BusinessException("已进入封存批次的归档票据不能直接更换影像，需先申请解封");
-                }
-            }
-            if (changeReason == null || changeReason.trim().isEmpty()) {
-                throw new BusinessException("已归档票据补扫影像必须填写补扫原因");
-            }
+        if (invoice.getStatus() == InvoiceStatus.SEALED 
+                || invoice.getStatus() == InvoiceStatus.AUDIT_SPOTCHECK
+                || invoice.getStatus() == InvoiceStatus.ARCHIVED) {
+            throw new BusinessException("已归档票据不能更换影像，请先申请退回补扫");
         }
 
         if (changeReason == null || changeReason.trim().isEmpty()) {

@@ -673,7 +673,27 @@ const ArchivePage = ({ user }) => {
         { title: '归档盒', dataIndex: 'archiveBoxNo', key: 'archiveBoxNo' },
         { title: '位置', dataIndex: 'archivePosition', key: 'archivePosition' },
         { title: '档案员', dataIndex: 'archivistName', key: 'archivistName' },
-        { title: '归档时间', dataIndex: 'archiveTime', key: 'archiveTime' }
+        { title: '归档时间', dataIndex: 'archiveTime', key: 'archiveTime' },
+        {
+            title: '操作',
+            key: 'action',
+            width: 120,
+            render: (_, record) => (
+                <Space>
+                    <Button 
+                        type="link" 
+                        danger 
+                        size="small"
+                        onClick={() => {
+                            setSelectedInvoiceId(record.invoiceId);
+                            setReturnModalVisible(true);
+                        }}
+                    >
+                        退回
+                    </Button>
+                </Space>
+            )
+        }
     ];
 
     const batchColumns = [
@@ -888,17 +908,40 @@ const ArchivePage = ({ user }) => {
             <Modal
                 title="退回补扫"
                 visible={returnModalVisible}
-                onCancel={() => setReturnModalVisible(false)}
+                onCancel={() => {
+                    setReturnModalVisible(false);
+                    returnForm.resetFields();
+                }}
                 onOk={() => returnForm.submit()}
-                width={500}
+                width={550}
+                okText="确认退回"
+                cancelText="取消"
             >
+                <div style={{marginBottom: 16, padding: 12, backgroundColor: '#f5f5f5', borderRadius: 4}}>
+                    <div style={{fontSize: 13, color: '#666', marginBottom: 8}}>
+                        <strong>票据代码：</strong>
+                        {records.find(r => r.invoiceId === selectedInvoiceId)?.invoiceCode || '-'}
+                    </div>
+                    <div style={{fontSize: 13, color: '#666', marginBottom: 8}}>
+                        <strong>归档编号：</strong>
+                        {records.find(r => r.invoiceId === selectedInvoiceId)?.archiveNo || '-'}
+                    </div>
+                    <div style={{fontSize: 13, color: '#666'}}>
+                        <strong>归档盒位置：</strong>
+                        {records.find(r => r.invoiceId === selectedInvoiceId)?.archiveBoxNo || '-'} 
+                        / {records.find(r => r.invoiceId === selectedInvoiceId)?.archivePosition || '-'}
+                    </div>
+                </div>
                 <Form form={returnForm} onFinish={handleReturn} layout="vertical">
                     <Form.Item
                         label="退回原因"
                         name="returnReason"
                         rules={[{ required: true, message: '请输入退回原因' }]}
                     >
-                        <TextArea rows={4} placeholder="请输入退回原因" />
+                        <TextArea 
+                            rows={4} 
+                            placeholder="请详细说明退回原因，如：影像不清晰、信息有误需补扫等" 
+                        />
                     </Form.Item>
                 </Form>
             </Modal>

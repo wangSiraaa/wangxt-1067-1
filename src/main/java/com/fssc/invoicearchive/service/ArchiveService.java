@@ -131,8 +131,8 @@ public class ArchiveService {
         Invoice invoice = invoiceRepository.findById(invoiceId)
                 .orElseThrow(() -> new BusinessException("票据不存在"));
 
-        if (invoice.getStatus() != InvoiceStatus.ARCHIVED && invoice.getStatus() != InvoiceStatus.ASSOCIATED) {
-            throw new BusinessException("当前状态不能退回，状态: " + invoice.getStatus());
+        if (invoice.getStatus() != InvoiceStatus.ARCHIVED) {
+            throw new BusinessException("只有已归档的票据才能退回，当前状态: " + invoice.getStatus());
         }
 
         if (invoice.getArchiveBatchId() != null) {
