@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  invoice-archive:
+    build: .
+    container_name: invoice-archive
+    ports:
+      - "8080:8080"
+    environment:
+      - JAVA_OPTS=-Xmx512m -Xms256m
+    restart: unless-stopped
+    volumes:
+      - invoice-data:/data
+
+volumes:
+  invoice-data:
