@@ -104,6 +104,18 @@ public class Invoice {
     @Column(name = "archive_batch_id")
     private Long archiveBatchId;
 
+    @Column(name = "red_invoice_flag", nullable = false)
+    private Boolean redInvoiceFlag = false;
+
+    @Column(name = "original_invoice_id")
+    private Long originalInvoiceId;
+
+    @Column(name = "red_invoice_id")
+    private Long redInvoiceId;
+
+    @Column(name = "red_reason", length = 500)
+    private String redReason;
+
     @Column(name = "return_reason", length = 500)
     private String returnReason;
 
@@ -374,6 +386,38 @@ public class Invoice {
 
     public void setArchiveBatchId(Long archiveBatchId) {
         this.archiveBatchId = archiveBatchId;
+    }
+
+    public Boolean getRedInvoiceFlag() {
+        return redInvoiceFlag;
+    }
+
+    public void setRedInvoiceFlag(Boolean redInvoiceFlag) {
+        this.redInvoiceFlag = redInvoiceFlag;
+    }
+
+    public Long getOriginalInvoiceId() {
+        return originalInvoiceId;
+    }
+
+    public void setOriginalInvoiceId(Long originalInvoiceId) {
+        this.originalInvoiceId = originalInvoiceId;
+    }
+
+    public Long getRedInvoiceId() {
+        return redInvoiceId;
+    }
+
+    public void setRedInvoiceId(Long redInvoiceId) {
+        this.redInvoiceId = redInvoiceId;
+    }
+
+    public String getRedReason() {
+        return redReason;
+    }
+
+    public void setRedReason(String redReason) {
+        this.redReason = redReason;
     }
 
     public String getReturnReason() {

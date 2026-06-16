@@ -93,4 +93,13 @@ public class InvoiceController {
         boolean unique = invoiceService.checkInvoiceUnique(invoiceCode);
         return Result.success(unique);
     }
+
+    @PostMapping("/redback")
+    public Result<Invoice> redBackInvoice(@RequestBody Map<String, Object> params) {
+        Long originalInvoiceId = params.get("originalInvoiceId") != null ? Long.valueOf(params.get("originalInvoiceId").toString()) : null;
+        String redReason = (String) params.get("redReason");
+
+        Invoice redInvoice = invoiceService.redBackInvoice(originalInvoiceId, redReason);
+        return Result.success("红冲票据创建成功", redInvoice);
+    }
 }

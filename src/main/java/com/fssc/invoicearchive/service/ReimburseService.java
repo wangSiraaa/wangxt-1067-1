@@ -103,8 +103,8 @@ public class ReimburseService {
         Invoice invoice = invoiceRepository.findById(invoiceId)
                 .orElseThrow(() -> new BusinessException("票据不存在"));
 
-        if (invoice.getStatus() == InvoiceStatus.ARCHIVED || invoice.getStatus() == InvoiceStatus.SEALED) {
-            throw new BusinessException("已归档票据不能取消关联");
+        if (invoice.getStatus() == InvoiceStatus.ARCHIVED || invoice.getStatus() == InvoiceStatus.SEALED || invoice.getStatus() == InvoiceStatus.AUDIT_SPOTCHECK) {
+            throw new BusinessException("已归档/封存/抽查中的票据不能取消关联");
         }
 
         if (invoice.getReimburseBillId() == null) {

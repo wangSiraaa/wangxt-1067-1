@@ -4,6 +4,7 @@ import com.fssc.invoicearchive.common.Result;
 import com.fssc.invoicearchive.entity.ArchiveBatch;
 import com.fssc.invoicearchive.entity.ArchiveRecord;
 import com.fssc.invoicearchive.entity.Invoice;
+import com.fssc.invoicearchive.entity.UnsealRequest;
 import com.fssc.invoicearchive.service.ArchiveService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -54,6 +55,68 @@ public class ArchiveController {
 
         ArchiveBatch batch = archiveService.sealBatch(batchId);
         return Result.success("批次封存成功", batch);
+    }
+
+    @PostMapping("/batch/spotcheck")
+    public Result<ArchiveBatch> spotCheckBatch(@RequestBody Map<String, Object> params) {
+        Long batchId = params.get("batchId") != null ? Long.valueOf(params.get("batchId").toString()) : null;
+        String reason = (String) params.get("reason");
+
+        ArchiveBatch batch = archiveService.spotCheckBatch(batchId, reason);
+        return Result.success("审计抽查已发起", batch);
+    }
+
+    @PostMapping("/batch/endSpotcheck")
+    public Result<ArchiveBatch> endSpotCheck(@RequestBody Map<String, Object> params) {
+        Long batchId = params.get("batchId") != null ? Long.valueOf(params.get("batchId").toString()) : null;
+
+        ArchiveBatch batch = archiveService.endSpotCheck(batchId);
+        return Result.success("审计抽查已结束", batch);
+    }
+
+    @PostMapping("/unseal/submit")
+    public Result<UnsealRequest> submitUnsealRequest(@RequestBody Map<String, Object> params) {
+        Long batchId = params.get("batchId") != null ? Long.valueOf(params.get("batchId").toString()) : null;
+        String requestType = (String) params.get("requestType");
+        String reason = (String) params.get("reason");
+
+        UnsealRequest request = archiveService.submitUnsealRequest(batchId, requestType, reason);
+        return Result.success("解封申请已提交", request);
+    }
+
+    @PostMapping("/unseal/approve")
+    public Result<UnsealRequest> approveUnsealRequest(@RequestBody Map<String, Object> params) {
+        Long requestId = params.get("requestId") != null ? Long.valueOf(params.get("requestId").toString()) : null;
+
+        UnsealRequest request = archiveService.approveUnsealRequest(requestId);
+        return Result.success("解封申请已审批通过", request);
+    }
+
+    @PostMapping("/unseal/reject")
+    public Result<UnsealRequest> rejectUnsealRequest(@RequestBody Map<String, Object> params) {
+        Long requestId = params.get("requestId") != null ? Long.valueOf(params.get("requestId").toString()) : null;
+        String rejectReason = (String) params.get("rejectReason");
+
+        UnsealRequest request = archiveService.rejectUnsealRequest(requestId, rejectReason);
+        return Result.success("解封申请已驳回", request);
+    }
+
+    @GetMapping("/unseal/requests")
+    public Result<List<UnsealRequest>> getAllUnsealRequests() {
+        List<UnsealRequest> requests = archiveService.getAllUnsealRequests();
+        return Result.success(requests);
+    }
+
+    @GetMapping("/unseal/pending")
+    public Result<List<UnsealRequest>> getPendingUnsealRequests() {
+        List<UnsealRequest> requests = archiveService.getPendingUnsealRequests();
+        return Result.success(requests);
+    }
+
+    @GetMapping("/unseal/batch/{batchId}")
+    public Result<List<UnsealRequest>> getUnsealRequestsByBatch(@PathVariable Long batchId) {
+        List<UnsealRequest> requests = archiveService.getUnsealRequestsByBatch(batchId);
+        return Result.success(requests);
     }
 
     @GetMapping("/batches")

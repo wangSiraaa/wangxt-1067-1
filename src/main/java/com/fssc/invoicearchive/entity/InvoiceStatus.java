@@ -5,5 +5,6 @@ public enum InvoiceStatus {
     ASSOCIATED,
     ARCHIVED,
     RETURNED,
-    SEALED
+    SEALED,
+    AUDIT_SPOTCHECK
 }

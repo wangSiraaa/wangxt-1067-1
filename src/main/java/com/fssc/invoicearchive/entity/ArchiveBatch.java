@@ -41,6 +41,21 @@ public class ArchiveBatch {
     @Column(name = "remark", length = 500)
     private String remark;
 
+    @Column(name = "spotcheck_flag", nullable = false)
+    private Boolean spotcheckFlag = false;
+
+    @Column(name = "spotcheck_operator_id")
+    private Long spotcheckOperatorId;
+
+    @Column(name = "spotcheck_operator_name", length = 50)
+    private String spotcheckOperatorName;
+
+    @Column(name = "spotcheck_time")
+    private LocalDateTime spotcheckTime;
+
+    @Column(name = "spotcheck_reason", length = 500)
+    private String spotcheckReason;
+
     @Column(name = "create_time")
     private LocalDateTime createTime;
 
@@ -133,6 +148,46 @@ public class ArchiveBatch {
 
     public void setRemark(String remark) {
         this.remark = remark;
+    }
+
+    public Boolean getSpotcheckFlag() {
+        return spotcheckFlag;
+    }
+
+    public void setSpotcheckFlag(Boolean spotcheckFlag) {
+        this.spotcheckFlag = spotcheckFlag;
+    }
+
+    public Long getSpotcheckOperatorId() {
+        return spotcheckOperatorId;
+    }
+
+    public void setSpotcheckOperatorId(Long spotcheckOperatorId) {
+        this.spotcheckOperatorId = spotcheckOperatorId;
+    }
+
+    public String getSpotcheckOperatorName() {
+        return spotcheckOperatorName;
+    }
+
+    public void setSpotcheckOperatorName(String spotcheckOperatorName) {
+        this.spotcheckOperatorName = spotcheckOperatorName;
+    }
+
+    public LocalDateTime getSpotcheckTime() {
+        return spotcheckTime;
+    }
+
+    public void setSpotcheckTime(LocalDateTime spotcheckTime) {
+        this.spotcheckTime = spotcheckTime;
+    }
+
+    public String getSpotcheckReason() {
+        return spotcheckReason;
+    }
+
+    public void setSpotcheckReason(String spotcheckReason) {
+        this.spotcheckReason = spotcheckReason;
     }
 
     public LocalDateTime getCreateTime() {

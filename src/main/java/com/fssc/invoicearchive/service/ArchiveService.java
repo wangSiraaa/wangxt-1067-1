@@ -6,6 +6,7 @@ import com.fssc.invoicearchive.entity.*;
 import com.fssc.invoicearchive.repository.ArchiveBatchRepository;
 import com.fssc.invoicearchive.repository.ArchiveRecordRepository;
 import com.fssc.invoicearchive.repository.InvoiceRepository;
+import com.fssc.invoicearchive.repository.UnsealRequestRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +32,9 @@ public class ArchiveService {
 
     @Autowired
     private AuditLogService auditLogService;
+
+    @Autowired
+    private UnsealRequestRepository unsealRequestRepository;
 
     @Transactional
     public ArchiveRecord archiveInvoice(Long invoiceId, String archiveBoxNo, String archivePosition, Long archiveBatchId) {
@@ -273,5 +277,265 @@ public class ArchiveService {
         String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMM"));
         long count = archiveBatchRepository.count();
         return "PC" + dateStr + String.format("%04d", count + 1);
+    }
+
+    private String generateRequestNo() {
+        String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        long count = unsealRequestRepository.count();
+        return "JF" + dateStr + String.format("%04d", count + 1);
+    }
+
+    @Transactional
+    public ArchiveBatch spotCheckBatch(Long batchId, String reason) {
+        userService.checkRole(RoleType.AUDITOR);
+
+        ArchiveBatch batch = archiveBatchRepository.findById(batchId)
+                .orElseThrow(() -> new BusinessException("归档批次不存在"));
+
+        if (!batch.getSealed()) {
+            throw new BusinessException("只有已封存的批次才能发起审计抽查");
+        }
+
+        if (batch.getSpotcheckFlag()) {
+            throw new BusinessException("该批次已在抽查中，不能重复发起");
+        }
+
+        batch.setSpotcheckFlag(true);
+        batch.setSpotcheckOperatorId(UserContext.getCurrentUserId());
+        batch.setSpotcheckOperatorName(UserContext.getCurrentUserName());
+        batch.setSpotcheckTime(LocalDateTime.now());
+        batch.setSpotcheckReason(reason);
+        batch = archiveBatchRepository.save(batch);
+
+        List<Invoice> invoices = invoiceRepository.findByArchiveBatchId(batchId);
+        for (Invoice invoice : invoices) {
+            InvoiceStatus beforeStatus = invoice.getStatus();
+            invoice.setStatus(InvoiceStatus.AUDIT_SPOTCHECK);
+            invoiceRepository.save(invoice);
+
+            auditLogService.logOperation(
+                    invoice.getId(),
+                    invoice.getInvoiceCode(),
+                    "AUDIT_SPOTCHECK",
+                    "审计抽查，批次号: " + batch.getBatchNo() + "，原因: " + reason,
+                    beforeStatus,
+                    InvoiceStatus.AUDIT_SPOTCHECK,
+                    UserContext.getCurrentUserId(),
+                    UserContext.getCurrentUserName(),
+                    RoleType.AUDITOR
+            );
+        }
+
+        return batch;
+    }
+
+    @Transactional
+    public ArchiveBatch endSpotCheck(Long batchId) {
+        userService.checkRole(RoleType.AUDITOR);
+
+        ArchiveBatch batch = archiveBatchRepository.findById(batchId)
+                .orElseThrow(() -> new BusinessException("归档批次不存在"));
+
+        if (!batch.getSpotcheckFlag()) {
+            throw new BusinessException("该批次未在抽查中");
+        }
+
+        batch.setSpotcheckFlag(false);
+        batch.setSpotcheckOperatorId(null);
+        batch.setSpotcheckOperatorName(null);
+        batch.setSpotcheckTime(null);
+        batch.setSpotcheckReason(null);
+        batch = archiveBatchRepository.save(batch);
+
+        List<Invoice> invoices = invoiceRepository.findByArchiveBatchId(batchId);
+        for (Invoice invoice : invoices) {
+            if (invoice.getStatus() == InvoiceStatus.AUDIT_SPOTCHECK) {
+                InvoiceStatus beforeStatus = invoice.getStatus();
+                invoice.setStatus(InvoiceStatus.SEALED);
+                invoiceRepository.save(invoice);
+
+                auditLogService.logOperation(
+                        invoice.getId(),
+                        invoice.getInvoiceCode(),
+                        "END_SPOTCHECK",
+                        "结束审计抽查，恢复封存状态，批次号: " + batch.getBatchNo(),
+                        beforeStatus,
+                        InvoiceStatus.SEALED,
+                        UserContext.getCurrentUserId(),
+                        UserContext.getCurrentUserName(),
+                        RoleType.AUDITOR
+                );
+            }
+        }
+
+        return batch;
+    }
+
+    @Transactional
+    public UnsealRequest submitUnsealRequest(Long batchId, String requestType, String reason) {
+        userService.checkRole(RoleType.ARCHIVIST);
+
+        ArchiveBatch batch = archiveBatchRepository.findById(batchId)
+                .orElseThrow(() -> new BusinessException("归档批次不存在"));
+
+        if (!batch.getSealed()) {
+            throw new BusinessException("未封存的批次无需解封");
+        }
+
+        if (unsealRequestRepository.existsByBatchIdAndStatus(batchId, "PENDING")) {
+            throw new BusinessException("该批次已有待审批的解封申请");
+        }
+
+        UnsealRequest request = new UnsealRequest();
+        request.setRequestNo(generateRequestNo());
+        request.setBatchId(batchId);
+        request.setBatchNo(batch.getBatchNo());
+        request.setRequestType(requestType);
+        request.setReason(reason);
+        request.setApplicantId(UserContext.getCurrentUserId());
+        request.setApplicantName(UserContext.getCurrentUserName());
+        request.setStatus("PENDING");
+
+        request = unsealRequestRepository.save(request);
+
+        auditLogService.logOperation(
+                null,
+                batch.getBatchNo(),
+                "UNSEAL_REQUEST",
+                "提交解封申请，类型: " + requestType + "，原因: " + reason,
+                null,
+                null,
+                UserContext.getCurrentUserId(),
+                UserContext.getCurrentUserName(),
+                RoleType.ARCHIVIST
+        );
+
+        return request;
+    }
+
+    @Transactional
+    public UnsealRequest approveUnsealRequest(Long requestId) {
+        userService.checkRole(RoleType.AUDITOR);
+
+        UnsealRequest request = unsealRequestRepository.findById(requestId)
+                .orElseThrow(() -> new BusinessException("解封申请不存在"));
+
+        if (!"PENDING".equals(request.getStatus())) {
+            throw new BusinessException("该申请不是待审批状态");
+        }
+
+        request.setStatus("APPROVED");
+        request.setApproverId(UserContext.getCurrentUserId());
+        request.setApproverName(UserContext.getCurrentUserName());
+        request.setApproveTime(LocalDateTime.now());
+        request = unsealRequestRepository.save(request);
+
+        unsealBatch(request.getBatchId());
+
+        auditLogService.logOperation(
+                null,
+                request.getBatchNo(),
+                "UNSEAL_APPROVE",
+                "解封申请审批通过，申请号: " + request.getRequestNo(),
+                null,
+                null,
+                UserContext.getCurrentUserId(),
+                UserContext.getCurrentUserName(),
+                RoleType.AUDITOR
+        );
+
+        return request;
+    }
+
+    @Transactional
+    public UnsealRequest rejectUnsealRequest(Long requestId, String rejectReason) {
+        userService.checkRole(RoleType.AUDITOR);
+
+        UnsealRequest request = unsealRequestRepository.findById(requestId)
+                .orElseThrow(() -> new BusinessException("解封申请不存在"));
+
+        if (!"PENDING".equals(request.getStatus())) {
+            throw new BusinessException("该申请不是待审批状态");
+        }
+
+        request.setStatus("REJECTED");
+        request.setApproverId(UserContext.getCurrentUserId());
+        request.setApproverName(UserContext.getCurrentUserName());
+        request.setApproveTime(LocalDateTime.now());
+        request.setRejectReason(rejectReason);
+        request = unsealRequestRepository.save(request);
+
+        auditLogService.logOperation(
+                null,
+                request.getBatchNo(),
+                "UNSEAL_REJECT",
+                "解封申请被驳回，申请号: " + request.getRequestNo() + "，驳回原因: " + rejectReason,
+                null,
+                null,
+                UserContext.getCurrentUserId(),
+                UserContext.getCurrentUserName(),
+                RoleType.AUDITOR
+        );
+
+        return request;
+    }
+
+    @Transactional
+    public ArchiveBatch unsealBatch(Long batchId) {
+        ArchiveBatch batch = archiveBatchRepository.findById(batchId)
+                .orElseThrow(() -> new BusinessException("归档批次不存在"));
+
+        if (!batch.getSealed()) {
+            throw new BusinessException("批次未封存，无需解封");
+        }
+
+        batch.setSealed(false);
+        batch.setSealTime(null);
+        batch.setSealOperatorId(null);
+        batch.setSealOperatorName(null);
+
+        if (batch.getSpotcheckFlag()) {
+            batch.setSpotcheckFlag(false);
+            batch.setSpotcheckOperatorId(null);
+            batch.setSpotcheckOperatorName(null);
+            batch.setSpotcheckTime(null);
+            batch.setSpotcheckReason(null);
+        }
+
+        batch = archiveBatchRepository.save(batch);
+
+        List<Invoice> invoices = invoiceRepository.findByArchiveBatchId(batchId);
+        for (Invoice invoice : invoices) {
+            InvoiceStatus beforeStatus = invoice.getStatus();
+            InvoiceStatus targetStatus = InvoiceStatus.ARCHIVED;
+            invoice.setStatus(targetStatus);
+            invoiceRepository.save(invoice);
+
+            auditLogService.logOperation(
+                    invoice.getId(),
+                    invoice.getInvoiceCode(),
+                    "UNSEAL",
+                    "批次解封，批次号: " + batch.getBatchNo(),
+                    beforeStatus,
+                    targetStatus,
+                    UserContext.getCurrentUserId(),
+                    UserContext.getCurrentUserName(),
+                    RoleType.ARCHIVIST
+            );
+        }
+
+        return batch;
+    }
+
+    public List<UnsealRequest> getUnsealRequestsByBatch(Long batchId) {
+        return unsealRequestRepository.findByBatchIdOrderByCreateTimeDesc(batchId);
+    }
+
+    public List<UnsealRequest> getPendingUnsealRequests() {
+        return unsealRequestRepository.findByStatusOrderByCreateTimeDesc("PENDING");
+    }
+
+    public List<UnsealRequest> getAllUnsealRequests() {
+        return unsealRequestRepository.findAll();
     }
 }

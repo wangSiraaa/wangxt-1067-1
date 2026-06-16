@@ -20,7 +20,8 @@ const StatusTag = ({ status }) => {
         ASSOCIATED: { text: '已关联', className: 'status-associated' },
         ARCHIVED: { text: '已归档', className: 'status-archived' },
         RETURNED: { text: '已退回', className: 'status-returned' },
-        SEALED: { text: '已封存', className: 'status-sealed' }
+        SEALED: { text: '已封存', className: 'status-sealed' },
+        AUDIT_SPOTCHECK: { text: '审计抽查中', className: 'status-spotcheck' }
     };
     const info = statusMap[status] || { text: status, className: 'status-uploaded' };
     return <span className={`status-tag ${info.className}`}>{info.text}</span>;
@@ -376,6 +377,10 @@ const InvoiceDetailModal = ({ invoiceId, visible, onClose }) => {
                             <Descriptions.Item label="上传人">{invoice.uploaderName}</Descriptions.Item>
                             <Descriptions.Item label="关联报销单">{invoice.reimburseBillNo || '未关联'}</Descriptions.Item>
                             <Descriptions.Item label="归档盒">{invoice.archiveBoxNo || '未归档'}</Descriptions.Item>
+                            {invoice.redInvoiceFlag && <Descriptions.Item label="红冲标记" span={2}><Tag color="red">红冲票据</Tag> {invoice.redReason && <span style={{color:'#8c8c8c'}}>原因：{invoice.redReason}</span>}</Descriptions.Item>}
+                            {invoice.redInvoiceId && <Descriptions.Item label="红冲票" span={2}><Button type="link" onClick={() => { setSelectedInvoiceId(invoice.redInvoiceId); loadDetail(); }}>查看红冲票据 →</Button></Descriptions.Item>}
+                            {invoice.originalInvoiceId && <Descriptions.Item label="原始票据" span={2}><Button type="link" onClick={() => { setSelectedInvoiceId(invoice.originalInvoiceId); loadDetail(); }}>← 查看原始票据</Button></Descriptions.Item>}
+                            {invoice.archiveBoxNo && <Descriptions.Item label="归档盒位置" span={2}><Tag color="blue">📦 {invoice.archiveBoxNo}</Tag> <Tag color="cyan">📍 {invoice.archivePosition}</Tag></Descriptions.Item>}
                         </Descriptions>
                         <div style={{ marginTop: 16 }}>
                             <div className="image-placeholder">
@@ -555,6 +560,16 @@ const ArchivePage = ({ user }) => {
     const [invoices, setInvoices] = useState([]);
     const [form] = Form.useForm();
     const [returnForm] = Form.useForm();
+    const [unsealModalVisible, setUnsealModalVisible] = useState(false);
+    const [unsealForm] = Form.useForm();
+    const [selectedBatchId, setSelectedBatchId] = useState(null);
+    const [unsealRequests, setUnsealRequests] = useState([]);
+    const [spotcheckModalVisible, setSpotcheckModalVisible] = useState(false);
+    const [spotcheckForm] = Form.useForm();
+    const [spotcheckBatchId, setSpotcheckBatchId] = useState(null);
+    const [batchDetailVisible, setBatchDetailVisible] = useState(false);
+    const [batchInvoices, setBatchInvoices] = useState([]);
+    const [batchUnsealRequests, setBatchUnsealRequests] = useState([]);
 
     const loadData = async () => {
         try {
@@ -564,6 +579,10 @@ const ArchivePage = ({ user }) => {
             setBatches(bts);
             const invs = await api.get('/api/invoice/list?status=ASSOCIATED');
             setInvoices(invs);
+            try {
+                const reqs = await api.get('/api/archive/unseal/requests');
+                setUnsealRequests(reqs);
+            } catch(e) { console.error(e); }
         } catch (e) {
             console.error(e);
         }
@@ -605,6 +624,49 @@ const ArchivePage = ({ user }) => {
         }
     };
 
+    const handleUnsealSubmit = async (values) => {
+        try {
+            await api.post('/api/archive/unseal/submit', {
+                batchId: selectedBatchId,
+                requestType: values.requestType,
+                reason: values.reason
+            });
+            message.success('解封申请已提交');
+            setUnsealModalVisible(false);
+            unsealForm.resetFields();
+            loadData();
+        } catch(e) {
+            message.error(e.message || '提交失败');
+        }
+    };
+
+    const handleSpotcheck = async (values) => {
+        try {
+            await api.post('/api/archive/batch/spotcheck', {
+                batchId: spotcheckBatchId,
+                reason: values.reason
+            });
+            message.success('审计抽查已发起');
+            setSpotcheckModalVisible(false);
+            spotcheckForm.resetFields();
+            loadData();
+        } catch(e) {
+            message.error(e.message || '操作失败');
+        }
+    };
+
+    const loadBatchDetail = async (batchId) => {
+        try {
+            const invs = await api.get(`/api/archive/batch/${batchId}/invoices`);
+            setBatchInvoices(invs);
+            try {
+                const reqs = await api.get(`/api/archive/unseal/batch/${batchId}`);
+                setBatchUnsealRequests(reqs);
+            } catch(e) { setBatchUnsealRequests([]); }
+            setBatchDetailVisible(true);
+        } catch(e) { console.error(e); }
+    };
+
     const recordColumns = [
         { title: '归档编号', dataIndex: 'archiveNo', key: 'archiveNo' },
         { title: '票据代码', dataIndex: 'invoiceCode', key: 'invoiceCode' },
@@ -618,25 +680,107 @@ const ArchivePage = ({ user }) => {
         { title: '批次号', dataIndex: 'batchNo', key: 'batchNo' },
         { title: '批次名称', dataIndex: 'batchName', key: 'batchName' },
         { title: '票据数量', dataIndex: 'invoiceCount', key: 'invoiceCount' },
-        { title: '状态', dataIndex: 'sealed', key: 'sealed', render: s => s ? <Tag color="default">已封存</Tag> : <Tag color="green">正常</Tag> },
+        {
+            title: '状态',
+            key: 'status',
+            render: (_, r) => {
+                if (r.spotcheckFlag) return <Tag color="orange">审计抽查中</Tag>;
+                if (r.sealed) return <Tag color="default">已封存</Tag>;
+                return <Tag color="green">正常</Tag>;
+            }
+        },
         { title: '创建人', dataIndex: 'archivistName', key: 'archivistName' },
         {
             title: '操作',
             key: 'action',
-            render: (_, record) => !record.sealed && (
-                <Popconfirm
-                    title="确认封存该批次？"
-                    description="封存后将无法修改或新增票据"
-                    onConfirm={async () => {
-                        try {
-                            await api.post('/api/archive/batch/seal', { batchId: record.id });
-                            message.success('封存成功');
-                            loadData();
-                        } catch (e) { console.error(e); }
-                    }}
-                >
-                    <Button type="link">封存</Button>
-                </Popconfirm>
+            render: (_, record) => (
+                <Space>
+                    <Button type="link" onClick={() => loadBatchDetail(record.id)}>查看明细</Button>
+                    {!record.sealed && (
+                        <Popconfirm
+                            title="确认封存该批次？"
+                            description="封存后将无法修改或新增票据"
+                            onConfirm={async () => {
+                                try {
+                                    await api.post('/api/archive/batch/seal', { batchId: record.id });
+                                    message.success('封存成功');
+                                    loadData();
+                                } catch (e) { console.error(e); }
+                            }}
+                        >
+                            <Button type="link">封存</Button>
+                        </Popconfirm>
+                    )}
+                    {record.sealed && !record.spotcheckFlag && user.role === 'AUDITOR' && (
+                        <Button type="link" style={{color:'orange'}} onClick={() => { setSpotcheckBatchId(record.id); setSpotcheckModalVisible(true); }}>发起抽查</Button>
+                    )}
+                    {record.spotcheckFlag && user.role === 'AUDITOR' && (
+                        <Popconfirm title="确认结束抽查？" onConfirm={async () => {
+                            try {
+                                await api.post('/api/archive/batch/endSpotcheck', { batchId: record.id });
+                                message.success('抽查已结束');
+                                loadData();
+                            } catch(e) { console.error(e); }
+                        }}>
+                            <Button type="link" style={{color:'green'}}>结束抽查</Button>
+                        </Popconfirm>
+                    )}
+                    {record.sealed && user.role === 'ARCHIVIST' && (
+                        <Button type="link" style={{color:'#faad14'}} onClick={() => { setSelectedBatchId(record.id); setUnsealModalVisible(true); }}>申请解封</Button>
+                    )}
+                </Space>
+            )
+        }
+    ];
+
+    const batchInvoiceColumns = [
+        { title: '票据代码', dataIndex: 'invoiceCode', key: 'invoiceCode' },
+        { title: '金额', dataIndex: 'amount', key: 'amount', render: v => `¥${v}` },
+        { title: '状态', dataIndex: 'status', key: 'status', render: s => <StatusTag status={s} /> },
+        {
+            title: '红冲关系',
+            key: 'redRelation',
+            render: (_, r) => {
+                if (r.redInvoiceFlag) return <Tag color="red">红冲票</Tag>;
+                if (r.redInvoiceId) return <Tag color="volcano">已被红冲</Tag>;
+                return <Tag color="blue">正常</Tag>;
+            }
+        },
+        { title: '归档盒', dataIndex: 'archiveBoxNo', key: 'archiveBoxNo' },
+        { title: '位置', dataIndex: 'archivePosition', key: 'archivePosition' },
+        { title: '版本', dataIndex: 'imageVersion', key: 'imageVersion', render: v => `v${v}` }
+    ];
+
+    const unsealColumns = [
+        { title: '申请单号', dataIndex: 'requestNo', key: 'requestNo' },
+        { title: '批次号', dataIndex: 'batchNo', key: 'batchNo' },
+        { title: '申请类型', dataIndex: 'requestType', key: 'requestType' },
+        { title: '原因', dataIndex: 'reason', key: 'reason', ellipsis: true },
+        { title: '申请人', dataIndex: 'applicantName', key: 'applicantName' },
+        { title: '状态', dataIndex: 'status', key: 'status', render: s => {
+            const m = { PENDING: {text:'待审批',color:'orange'}, APPROVED: {text:'已通过',color:'green'}, REJECTED: {text:'已驳回',color:'red'} };
+            const info = m[s] || {text:s,color:'default'};
+            return <Tag color={info.color}>{info.text}</Tag>;
+        }},
+        {
+            title: '操作',
+            key: 'action',
+            render: (_, r) => r.status === 'PENDING' && user.role === 'AUDITOR' && (
+                <Space>
+                    <Button type="link" style={{color:'green'}} onClick={async () => {
+                        try { await api.post('/api/archive/unseal/approve', { requestId: r.id }); message.success('已审批通过'); loadData(); } catch(e) { message.error(e.message); }
+                    }}>通过</Button>
+                    <Button type="link" danger onClick={() => {
+                        let reason = '';
+                        Modal.confirm({
+                            title: '驳回解封申请',
+                            content: <TextArea rows={3} placeholder="请输入驳回原因" onChange={e => reason = e.target.value} />,
+                            onOk: async () => {
+                                try { await api.post('/api/archive/unseal/reject', { requestId: r.id, rejectReason: reason }); message.success('已驳回'); loadData(); } catch(e) { message.error(e.message); }
+                            }
+                        });
+                    }}>驳回</Button>
+                </Space>
             )
         }
     ];
@@ -673,6 +817,14 @@ const ArchivePage = ({ user }) => {
                     <Table
                         columns={batchColumns}
                         dataSource={batches}
+                        rowKey="id"
+                        pagination={{ pageSize: 10 }}
+                    />
+                </TabPane>
+                <TabPane tab="解封申请" key="unseal">
+                    <Table
+                        columns={unsealColumns}
+                        dataSource={unsealRequests}
                         rowKey="id"
                         pagination={{ pageSize: 10 }}
                     />
@@ -749,6 +901,70 @@ const ArchivePage = ({ user }) => {
                         <TextArea rows={4} placeholder="请输入退回原因" />
                     </Form.Item>
                 </Form>
+            </Modal>
+
+            <Modal
+                title="提交解封申请"
+                visible={unsealModalVisible}
+                onCancel={() => setUnsealModalVisible(false)}
+                onOk={() => unsealForm.submit()}
+                width={500}
+            >
+                <Form form={unsealForm} onFinish={handleUnsealSubmit} layout="vertical">
+                    <Form.Item label="申请类型" name="requestType" rules={[{required:true, message:'请选择申请类型'}]}>
+                        <Select placeholder="请选择">
+                            <Option value="MODIFY">修改关联关系</Option>
+                            <Option value="RESCAN">补扫影像</Option>
+                            <Option value="OTHER">其他</Option>
+                        </Select>
+                    </Form.Item>
+                    <Form.Item label="申请原因" name="reason" rules={[{required:true, message:'请输入申请原因'}]}>
+                        <TextArea rows={4} placeholder="请详细说明解封原因" />
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            <Modal
+                title="发起审计抽查"
+                visible={spotcheckModalVisible}
+                onCancel={() => setSpotcheckModalVisible(false)}
+                onOk={() => spotcheckForm.submit()}
+                width={500}
+            >
+                <Form form={spotcheckForm} onFinish={handleSpotcheck} layout="vertical">
+                    <Form.Item label="抽查原因" name="reason" rules={[{required:true, message:'请输入抽查原因'}]}>
+                        <TextArea rows={4} placeholder="请说明抽查原因和范围" />
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            <Modal
+                title="批次票据明细（含红冲关系与归档盒位置）"
+                visible={batchDetailVisible}
+                onCancel={() => setBatchDetailVisible(false)}
+                footer={[<Button key="close" onClick={() => setBatchDetailVisible(false)}>关闭</Button>]}
+                width={900}
+            >
+                <Table
+                    columns={batchInvoiceColumns}
+                    dataSource={batchInvoices}
+                    rowKey="id"
+                    pagination={false}
+                    size="small"
+                    rowClassName={r => r.redInvoiceFlag ? 'red-invoice-row' : ''}
+                />
+                {batchUnsealRequests.length > 0 && (
+                    <div style={{marginTop:16}}>
+                        <h4>该批次解封申请记录</h4>
+                        {batchUnsealRequests.map(r => (
+                            <div key={r.id} style={{padding:'4px 0',borderBottom:'1px solid #f0f0f0'}}>
+                                <Tag color={r.status==='PENDING'?'orange':r.status==='APPROVED'?'green':'red'}>{r.status==='PENDING'?'待审批':r.status==='APPROVED'?'已通过':'已驳回'}</Tag>
+                                <span>{r.requestType} - {r.reason}</span>
+                                <span style={{color:'#8c8c8c',marginLeft:8}}>{r.applicantName} {r.createTime}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </Modal>
         </div>
     );

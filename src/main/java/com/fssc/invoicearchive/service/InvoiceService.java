@@ -5,6 +5,7 @@ import com.fssc.invoicearchive.context.UserContext;
 import com.fssc.invoicearchive.entity.*;
 import com.fssc.invoicearchive.repository.InvoiceImageVersionRepository;
 import com.fssc.invoicearchive.repository.InvoiceRepository;
+import com.fssc.invoicearchive.repository.ArchiveBatchRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,9 @@ public class InvoiceService {
 
     @Autowired
     private AuditLogService auditLogService;
+
+    @Autowired
+    private ArchiveBatchRepository archiveBatchRepository;
 
     @Transactional
     public Invoice uploadInvoice(String invoiceCode, String invoiceNumber, LocalDate invoiceDate,
@@ -102,8 +106,24 @@ public class InvoiceService {
         Invoice invoice = invoiceRepository.findById(invoiceId)
                 .orElseThrow(() -> new BusinessException("票据不存在"));
 
-        if (invoice.getStatus() == InvoiceStatus.ARCHIVED || invoice.getStatus() == InvoiceStatus.SEALED) {
-            throw new BusinessException("已归档票据不能更换影像");
+        if (invoice.getStatus() == InvoiceStatus.SEALED || invoice.getStatus() == InvoiceStatus.AUDIT_SPOTCHECK) {
+            throw new BusinessException("已封存或抽查中的票据不能更换影像，需先申请解封");
+        }
+
+        if (invoice.getStatus() == InvoiceStatus.ARCHIVED) {
+            if (invoice.getArchiveBatchId() != null) {
+                ArchiveBatch batch = archiveBatchRepository.findById(invoice.getArchiveBatchId()).orElse(null);
+                if (batch != null && batch.getSealed()) {
+                    throw new BusinessException("已进入封存批次的归档票据不能直接更换影像，需先申请解封");
+                }
+            }
+            if (changeReason == null || changeReason.trim().isEmpty()) {
+                throw new BusinessException("已归档票据补扫影像必须填写补扫原因");
+            }
+        }
+
+        if (changeReason == null || changeReason.trim().isEmpty()) {
+            throw new BusinessException("补扫影像必须填写变更原因");
         }
 
         int newVersion = invoice.getImageVersion() + 1;
@@ -196,5 +216,77 @@ public class InvoiceService {
 
     public boolean checkInvoiceUnique(String invoiceCode) {
         return !invoiceRepository.existsByInvoiceCode(invoiceCode);
+    }
+
+    @Transactional
+    public Invoice redBackInvoice(Long originalInvoiceId, String redReason) {
+        userService.checkRole(RoleType.ACCOUNTANT);
+
+        Invoice original = invoiceRepository.findById(originalInvoiceId)
+                .orElseThrow(() -> new BusinessException("原票据不存在"));
+
+        if (original.getRedInvoiceFlag()) {
+            throw new BusinessException("红冲票据不能再做红冲");
+        }
+
+        if (original.getRedInvoiceId() != null) {
+            throw new BusinessException("该票据已有红冲票据");
+        }
+
+        Invoice redInvoice = new Invoice();
+        redInvoice.setInvoiceCode(original.getInvoiceCode() + "-R");
+        redInvoice.setInvoiceNumber(original.getInvoiceNumber());
+        redInvoice.setInvoiceDate(original.getInvoiceDate());
+        redInvoice.setAmount(original.getAmount().negate());
+        redInvoice.setTaxAmount(original.getTaxAmount() != null ? original.getTaxAmount().negate() : null);
+        redInvoice.setTotalAmount(original.getTotalAmount() != null ? original.getTotalAmount().negate() : null);
+        redInvoice.setSellerName(original.getSellerName());
+        redInvoice.setSellerTaxNumber(original.getSellerTaxNumber());
+        redInvoice.setBuyerName(original.getBuyerName());
+        redInvoice.setBuyerTaxNumber(original.getBuyerTaxNumber());
+        redInvoice.setImageUrl(original.getImageUrl());
+        redInvoice.setImageVersion(1);
+        redInvoice.setImageMd5(original.getImageMd5());
+        redInvoice.setImageSize(original.getImageSize());
+        redInvoice.setStatus(InvoiceStatus.UPLOADED);
+        redInvoice.setUploaderId(UserContext.getCurrentUserId());
+        redInvoice.setUploaderName(UserContext.getCurrentUserName());
+        redInvoice.setUploadDept(UserContext.getCurrentUserDept());
+        redInvoice.setRedInvoiceFlag(true);
+        redInvoice.setOriginalInvoiceId(originalInvoiceId);
+        redInvoice.setRedReason(redReason);
+
+        redInvoice = invoiceRepository.save(redInvoice);
+
+        saveImageVersion(redInvoice, 1, "红冲票据，关联原票: " + original.getInvoiceCode());
+
+        original.setRedInvoiceId(redInvoice.getId());
+        invoiceRepository.save(original);
+
+        auditLogService.logOperation(
+                original.getId(),
+                original.getInvoiceCode(),
+                "RED_BACK",
+                "红冲票据，红冲票号: " + redInvoice.getInvoiceCode() + "，原因: " + redReason,
+                original.getStatus(),
+                original.getStatus(),
+                UserContext.getCurrentUserId(),
+                UserContext.getCurrentUserName(),
+                RoleType.ACCOUNTANT
+        );
+
+        auditLogService.logOperation(
+                redInvoice.getId(),
+                redInvoice.getInvoiceCode(),
+                "RED_BACK_CREATE",
+                "红冲票据创建，原票: " + original.getInvoiceCode() + "，原因: " + redReason,
+                null,
+                InvoiceStatus.UPLOADED,
+                UserContext.getCurrentUserId(),
+                UserContext.getCurrentUserName(),
+                RoleType.ACCOUNTANT
+        );
+
+        return redInvoice;
     }
 }
