@@ -1,7 +1,7 @@
 const { useState, useEffect } = React;
 const { Layout, Menu, Table, Button, Form, Input, InputNumber, Select, DatePicker,
         Modal, message, Tag, Card, Row, Col, Statistic, Tabs, List, Avatar,
-        Upload, Descriptions, Popconfirm, Space, Tooltip } = antd;
+        Upload, Descriptions, Popconfirm, Space, Tooltip, Alert } = antd;
 const { Header, Content, Sider } = Layout;
 const { Option } = Select;
 const { TextArea } = Input;
@@ -330,42 +330,106 @@ const InvoiceDetailModal = ({ invoiceId, visible, onClose }) => {
     const [auditLogs, setAuditLogs] = useState([]);
     const [loading, setLoading] = useState(false);
     const [activeTab, setActiveTab] = useState('info');
+    const [currentInvoiceId, setCurrentInvoiceId] = useState(null);
+    const [navHistory, setNavHistory] = useState([]);
 
     useEffect(() => {
         if (visible && invoiceId) {
-            loadDetail();
+            setCurrentInvoiceId(invoiceId);
+            setInvoice(null);
+            setVersions([]);
+            setAuditLogs([]);
+            setNavHistory([invoiceId]);
+            loadDetail(invoiceId);
         }
     }, [visible, invoiceId]);
 
-    const loadDetail = async () => {
+    const loadDetail = async (targetId) => {
+        const id = targetId || currentInvoiceId;
+        if (!id) return;
         setLoading(true);
         try {
-            const inv = await api.get(`/api/invoice/${invoiceId}`);
+            const inv = await api.get(`/api/invoice/${id}`);
             setInvoice(inv);
-            const vers = await api.get(`/api/invoice/${invoiceId}/versions`);
+            const vers = await api.get(`/api/invoice/${id}/versions`);
             setVersions(vers);
-            const logs = await api.get(`/api/audit/timeline/invoice/${invoiceId}`);
+            const logs = await api.get(`/api/audit/timeline/invoice/${id}`);
             setAuditLogs(logs);
         } catch (e) {
             console.error(e);
+            message.error('加载票据详情失败');
         } finally {
             setLoading(false);
         }
+    };
+
+    const navigateToInvoice = (targetId) => {
+        if (!targetId || targetId === currentInvoiceId) return;
+        setCurrentInvoiceId(targetId);
+        setInvoice(null);
+        setVersions([]);
+        setAuditLogs([]);
+        setNavHistory(prev => [...prev, targetId]);
+        loadDetail(targetId);
+    };
+
+    const goBack = () => {
+        if (navHistory.length <= 1) return;
+        const newHistory = navHistory.slice(0, -1);
+        const prevId = newHistory[newHistory.length - 1];
+        setCurrentInvoiceId(prevId);
+        setInvoice(null);
+        setVersions([]);
+        setAuditLogs([]);
+        setNavHistory(newHistory);
+        loadDetail(prevId);
     };
 
     if (!visible) return null;
 
     return (
         <Modal
-            title="票据详情"
+            title={
+                <span>
+                    票据详情
+                    {navHistory.length > 1 && (
+                        <Button type="link" size="small" onClick={goBack} style={{ marginLeft: 12 }}>
+                            ← 返回上一张
+                        </Button>
+                    )}
+                </span>
+            }
             visible={visible}
             onCancel={onClose}
             width={800}
             footer={[<Button key="close" onClick={onClose}>关闭</Button>]}
         >
+            {loading && !invoice && (
+                <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                    <p>加载中...</p>
+                </div>
+            )}
             {invoice && (
                 <Tabs activeKey={activeTab} onChange={setActiveTab}>
                     <TabPane tab="基本信息" key="info">
+                        {invoice.redInvoiceFlag && (
+                            <Alert
+                                message="红冲票据"
+                                description={invoice.redReason || '此票据为红冲票据'}
+                                type="warning"
+                                showIcon
+                                style={{ marginBottom: 16 }}
+                            />
+                        )}
+                        {invoice.redInvoiceId && !invoice.redInvoiceFlag && (
+                            <Alert
+                                message="该票据已被红冲"
+                                description="下方可查看红冲票据详情"
+                                type="info"
+                                showIcon
+                                style={{ marginBottom: 16 }}
+                            />
+                        )}
                         <Descriptions column={2} bordered size="small">
                             <Descriptions.Item label="票据代码">{invoice.invoiceCode}</Descriptions.Item>
                             <Descriptions.Item label="票据号码">{invoice.invoiceNumber || '-'}</Descriptions.Item>
@@ -377,10 +441,9 @@ const InvoiceDetailModal = ({ invoiceId, visible, onClose }) => {
                             <Descriptions.Item label="上传人">{invoice.uploaderName}</Descriptions.Item>
                             <Descriptions.Item label="关联报销单">{invoice.reimburseBillNo || '未关联'}</Descriptions.Item>
                             <Descriptions.Item label="归档盒">{invoice.archiveBoxNo || '未归档'}</Descriptions.Item>
-                            {invoice.redInvoiceFlag && <Descriptions.Item label="红冲标记" span={2}><Tag color="red">红冲票据</Tag> {invoice.redReason && <span style={{color:'#8c8c8c'}}>原因：{invoice.redReason}</span>}</Descriptions.Item>}
-                            {invoice.redInvoiceId && <Descriptions.Item label="红冲票" span={2}><Button type="link" onClick={() => { setSelectedInvoiceId(invoice.redInvoiceId); loadDetail(); }}>查看红冲票据 →</Button></Descriptions.Item>}
-                            {invoice.originalInvoiceId && <Descriptions.Item label="原始票据" span={2}><Button type="link" onClick={() => { setSelectedInvoiceId(invoice.originalInvoiceId); loadDetail(); }}>← 查看原始票据</Button></Descriptions.Item>}
-                            {invoice.archiveBoxNo && <Descriptions.Item label="归档盒位置" span={2}><Tag color="blue">📦 {invoice.archiveBoxNo}</Tag> <Tag color="cyan">📍 {invoice.archivePosition}</Tag></Descriptions.Item>}
+                            {invoice.redInvoiceId && <Descriptions.Item label="红冲票" span={2}><Button type="link" onClick={() => navigateToInvoice(invoice.redInvoiceId)}>查看红冲票据 →</Button></Descriptions.Item>}
+                            {invoice.originalInvoiceId && <Descriptions.Item label="原始票据" span={2}><Button type="link" onClick={() => navigateToInvoice(invoice.originalInvoiceId)}>← 查看原始票据</Button></Descriptions.Item>}
+                            {invoice.archiveBoxNo && <Descriptions.Item label="归档盒位置" span={2}><Tag color="blue">📦 {invoice.archiveBoxNo}</Tag> <Tag color="cyan">📍 {invoice.archivePosition || '-'}</Tag></Descriptions.Item>}
                         </Descriptions>
                         <div style={{ marginTop: 16 }}>
                             <div className="image-placeholder">
@@ -388,20 +451,21 @@ const InvoiceDetailModal = ({ invoiceId, visible, onClose }) => {
                             </div>
                         </div>
                     </TabPane>
-                    <TabPane tab="影像版本" key="versions">
+                    <TabPane tab={`影像版本 (${versions.length})`} key="versions">
                         <List
                             dataSource={versions}
                             renderItem={item => (
                                 <List.Item key={item.id}>
                                     <List.Item.Meta
                                         title={`版本 v${item.versionNumber}`}
-                                        description={`上传人：${item.uploaderName} | 上传时间：${item.createTime} | ${item.changeReason || ''}`}
+                                        description={`上传人：${item.uploaderName} | 上传时间：${item.createTime} | ${item.changeReason || '无备注'}`}
                                     />
                                 </List.Item>
                             )}
                         />
+                        {versions.length === 0 && <p style={{ color: '#8c8c8c', textAlign: 'center', padding: '20px 0' }}>暂无版本记录</p>}
                     </TabPane>
-                    <TabPane tab="审计时间线" key="timeline">
+                    <TabPane tab={`审计时间线 (${auditLogs.length})`} key="timeline">
                         {auditLogs.map((log, index) => (
                             <div key={log.id} className="timeline-item">
                                 <div className="timeline-time">{log.createTime}</div>
@@ -551,7 +615,7 @@ const ReimbursePage = ({ user }) => {
     );
 };
 
-const ArchivePage = ({ user }) => {
+const ArchivePage = ({ user, onViewDetail }) => {
     const [records, setRecords] = useState([]);
     const [batches, setBatches] = useState([]);
     const [archiveModalVisible, setArchiveModalVisible] = useState(false);
@@ -754,7 +818,16 @@ const ArchivePage = ({ user }) => {
     ];
 
     const batchInvoiceColumns = [
-        { title: '票据代码', dataIndex: 'invoiceCode', key: 'invoiceCode' },
+        { 
+            title: '票据代码', 
+            dataIndex: 'invoiceCode', 
+            key: 'invoiceCode',
+            render: (text, record) => onViewDetail ? (
+                <Button type="link" onClick={() => { onViewDetail(record.id); setBatchDetailVisible(false); }}>
+                    {text}
+                </Button>
+            ) : text
+        },
         { title: '金额', dataIndex: 'amount', key: 'amount', render: v => `¥${v}` },
         { title: '状态', dataIndex: 'status', key: 'status', render: s => <StatusTag status={s} /> },
         {
@@ -1201,7 +1274,7 @@ const App = () => {
             case 'dashboard': return <DashboardPage user={user} />;
             case 'upload': return <UploadPage user={user} />;
             case 'reimburse': return <ReimbursePage user={user} />;
-            case 'archive': return <ArchivePage user={user} />;
+            case 'archive': return <ArchivePage user={user} onViewDetail={handleViewDetail} />;
             case 'invoices': return <InvoiceListPage user={user} onViewDetail={handleViewDetail} />;
             case 'audit': return <AuditPage user={user} />;
             default: return <DashboardPage user={user} />;

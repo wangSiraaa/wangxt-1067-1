@@ -245,6 +245,9 @@ public class InvoiceService {
         redInvoice.setRedInvoiceFlag(true);
         redInvoice.setOriginalInvoiceId(originalInvoiceId);
         redInvoice.setRedReason(redReason);
+        redInvoice.setArchiveBoxNo(original.getArchiveBoxNo());
+        redInvoice.setArchivePosition(original.getArchivePosition());
+        redInvoice.setArchiveBatchId(original.getArchiveBatchId());
 
         redInvoice = invoiceRepository.save(redInvoice);
 
